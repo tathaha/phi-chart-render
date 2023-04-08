@@ -13,7 +13,7 @@ import './phizone';
     {
         // Init sentry
         Sentry.init({
-            dsn: "https://c0f2c5052bd740c3b734b74c7dd6d350@o4504077358792704.ingest.sentry.io/4504077363183616",
+            dsn: "https://14caf8a0649e490f94cd62f2df907385@o4504979854655488.ingest.sentry.io/4504979871891456",
             integrations: [ new BrowserTracing() ],
             tracesSampleRate: 1.0,
             maxBreadcrumbs: 50,
