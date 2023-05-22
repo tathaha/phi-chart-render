@@ -1,6 +1,6 @@
 import { number as verifyNum } from '@/verify';
 import * as Convert from './convert';
-import md5Encrypt from 'md5';
+import md5Hash from 'md5-js';
 import { Sprite, Graphics, Text } from 'pixi.js';
 
 export default class Chart
@@ -39,23 +39,19 @@ export default class Chart
             if (!isNaN(Number(rawChart.formatVersion)))
             {
                 chart = Convert.Official(rawChart);
-                chartMD5 = null;
             }
             else if (rawChart.META && !isNaN(Number(rawChart.META.RPEVersion)))
             {
-                let chartWithoutInfo = { ...rawChart };
-                delete chartWithoutInfo.META;
-                delete chartWithoutInfo.judgeLineGroup;
-                chartMD5 = md5Encrypt(JSON.stringify(chartWithoutInfo));
-
                 chart = Convert.RePhiEdit(rawChart);
                 chartInfo = chart.info;
             }
+
+            chartMD5 = md5Hash(JSON.stringify(rawChart));
         }
         else if (typeof rawChart == 'string')
         {
             chart = Convert.PhiEdit(rawChart);
-            chartMD5 = md5Encrypt(rawChart);
+            chartMD5 = md5Hash(rawChart);
         }
 
         if (!chart) throw new Error('Unsupported chart format');
@@ -153,7 +149,7 @@ export default class Chart
         if (isReaded) this.isLineTextureReaded = true;
     }
 
-    createSprites(stage, size, textures, zipFiles = {}, speed = 1, bgDim = 0.5, multiNoteHL = true, debug = false)
+    createSprites(stage, size, textures, uiStage = null, zipFiles = {}, speed = 1, bgDim = 0.5, multiNoteHL = true, debug = false)
     {
         let linesWithZIndex = [];
 
@@ -236,7 +232,8 @@ export default class Chart
         this.sprites.info.songName.anchor.set(0, 1);
         this.sprites.info.songName.zIndex = 99999;
 
-        stage.addChild(this.sprites.info.songName);
+        if (uiStage) uiStage.addChild(this.sprites.info.songName);
+        else stage.addChild(this.sprites.info.songName);
 
 
         this.sprites.info.songDiff = new Text((this.info.difficult || 'SP Lv.?'), {
@@ -246,7 +243,8 @@ export default class Chart
         this.sprites.info.songDiff.anchor.set(0, 1);
         this.sprites.info.songDiff.zIndex = 99999;
 
-        stage.addChild(this.sprites.info.songDiff);
+        if (uiStage) uiStage.addChild(this.sprites.info.songDiff);
+        else stage.addChild(this.sprites.info.songDiff);
     }
 
     resizeSprites(size, isEnded)

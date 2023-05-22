@@ -6,24 +6,28 @@ import { number as verifyNum } from '@/verify';
 
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 const GlobalAudioCtx = (new Audio().canPlayType('audio/ogg') == '') ? new oggmentedAudioContext() : new AudioCtx();
-var GlobalAudioLatency = 0;
 
 GlobalAudioCtx.addEventListener('statechange', () =>
 {
     if (GlobalAudioCtx.state === 'running')
     {
-        GlobalAudioLatency = (!isNaN(GlobalAudioCtx.baseLatency) ? GlobalAudioCtx.baseLatency : 0) + (!isNaN(GlobalAudioCtx.outputLatency) ? GlobalAudioCtx.outputLatency : 0);
+        // AudioTimer.initTimeDiff(GlobalAudioCtx.currentTime);
+        // console.info('[WAudio] Audio context is now activated, current timer difference: ' + AudioTimer.TimerDiff + 'ms');
 
         window.removeEventListener('click', ResumeGlobalAudioContext);
         window.removeEventListener('touchend', ResumeGlobalAudioContext);
         window.removeEventListener('mousemove', ResumeGlobalAudioContext);
         window.removeEventListener('scroll', ResumeGlobalAudioContext);
     }
+    else // Is it work?
+    {
+        ResumeGlobalAudioContext();
+    }
 });
 
 
 
-class WAudio
+export default class WAudio
 {
     constructor(src, loop = false, volume = 1, speed = 1, onend = undefined)
     {
@@ -53,6 +57,23 @@ class WAudio
         });
     }
 
+    reset()
+    {
+        if (this._buffer)
+        {
+            this._buffer.onended = undefined;
+            this._buffer.stop();
+            this._buffer.disconnect();
+            this._buffer = null;
+        }
+
+        if (this._timer)
+        {
+            this._timer.stop();
+            this._timer = null;
+        }
+    }
+
     play(withTimer = false)
     {
         if (withTimer && !this._timer) this._timer = new AudioTimer(this._speed);
@@ -67,8 +88,8 @@ class WAudio
         if (this._timer)
         {
             this._timer.speed = this._speed;
-            this._buffer.start(0, (this._timer.status !== 3 ? this._timer.time : 0));
-            this._timer.start();
+            this._buffer.start(0, (this._timer.status !== 3 && this._timer.time > 0 ? this._timer.time : 0));
+            this._timer.start(GlobalAudioCtx.currentTime);
         }
         else
         {
@@ -107,7 +128,8 @@ class WAudio
         if (this._timer.status === 1)
         {
             playedBeforeSeek = true;
-            this.pause();
+            this._buffer.onended = undefined;
+            this._buffer.stop();
         }
 
         this._timer.seek(duration);
@@ -161,12 +183,24 @@ class WAudio
         if (this._timer) this._timer.speed = this._speed;
         if (this._buffer) this._buffer.playbackRate.value = this._speed;
     }
+
+    static get AudioContext()
+    {
+        return GlobalAudioCtx;
+    }
+
+    static get globalLatency()
+    {
+        return (!isNaN(GlobalAudioCtx.baseLatency) ? GlobalAudioCtx.baseLatency : 0) + (!isNaN(GlobalAudioCtx.outputLatency) ? GlobalAudioCtx.outputLatency : 0);
+    }
 }
 
 
 
-window.addEventListener('load', async () =>
+window.addEventListener('load', () =>
 {
+    if (GlobalAudioCtx.state === 'running') return;
+    
     window.addEventListener('click', ResumeGlobalAudioContext);
     window.addEventListener('touchend', ResumeGlobalAudioContext);
     window.addEventListener('mousemove', ResumeGlobalAudioContext);
@@ -177,12 +211,6 @@ window.addEventListener('load', async () =>
 
 async function ResumeGlobalAudioContext()
 {
+    console.info('[WAudio] Trying resume audio context...');
     if (GlobalAudioCtx.state === 'suspended') await GlobalAudioCtx.resume();
 }
-
-
-
-export {
-    WAudio,
-    GlobalAudioLatency as audioLatency
-};

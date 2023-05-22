@@ -2,6 +2,7 @@ import * as verify from '@/verify';
 import Judgement from '@/judgement';
 import * as TickerFunc from './ticker';
 import * as CallbackFunc from './callback';
+import { Shader } from '@/main';
 import { Application, Container, Texture, Sprite, Graphics, Text, Rectangle, settings as PIXISettings } from 'pixi.js';
 
 PIXISettings.RENDER_OPTIONS.hello = true;
@@ -31,12 +32,12 @@ const ProgressBarCache = (() =>
   *         resolution?,
   *         autoDensity?,
   *         antialias?,
-  *         forceCanvas?,
   *         view?,
   *         resizeTo?
   *     },
   *     chart,
   *     assets,
+  *     effects?,
   *     zipFiles?,
   *     watermark?,
   *     settings: {
@@ -50,7 +51,6 @@ const ProgressBarCache = (() =>
   *         showInputPoint?,
   *         challengeMode?,
   *         autoPlay?,
-  *         forceCanvas?,
   *         debug?
   *     }
   * }
@@ -67,6 +67,7 @@ export default class Game
         /* ===== 加载谱面基本信息 ===== */
         this.chart    = params.chart;
         this.assets   = params.assets;
+        this.effects  = (!!params.settings.shader && params.effects instanceof Array && params.effects.length > 0) ? params.effects : [];
         this.zipFiles = params.zipFiles;
 
         if (!this.chart) throw new Error('You must select a chart to play');
@@ -80,7 +81,6 @@ export default class Game
             resolution      : verify.number(params.render.resolution, window.devicePixelRatio, 1),
             autoDensity     : verify.bool(params.render.autoDensity, true),
             antialias       : verify.bool(params.render.antialias, true),
-            forceCanvas     : verify.bool(params.render.forceCanvas, false),
             view            : params.render.canvas ? params.render.canvas : undefined,
             backgroundAlpha : 1
         });
@@ -91,6 +91,16 @@ export default class Game
         this.render.mainContainer.zIndex = 10;
         this.render.stage.addChild(this.render.mainContainer);
 
+        // 创建游戏精灵容器
+        this.render.gameContainer = new Container();
+        this.render.gameContainer.zIndex = 20;
+        this.render.mainContainer.addChild(this.render.gameContainer);
+
+        // 创建 UI 容器
+        this.render.UIContainer = new Container();
+        this.render.UIContainer.zIndex = 30;
+        this.render.mainContainer.addChild(this.render.UIContainer);
+
         // 创建舞台主渲染区可见范围
         this.render.mainContainerMask = new Graphics();
         this.render.mainContainerMask.cacheAsBitmap = true;
@@ -98,7 +108,7 @@ export default class Game
         /* ===== 创建判定 ===== */
         this.judgement = new Judgement({
             chart          : this.chart,
-            stage          : this.render.mainContainer,
+            stage          : this.render.UIContainer,
             canvas         : this.render.view,
             assets         : {
                 textures : { normal: this.assets.textures.clickRaw, bad: this.assets.textures.clickRaw },
@@ -129,6 +139,7 @@ export default class Game
 
         /* ===== 用户设置暂存 ===== */
         this._settings = {
+            resolution     : verify.number(params.render.resolution, window.devicePixelRatio, 1),
             noteScale      : verify.number(params.settings.noteScale, 8000),
             bgDim          : verify.number(params.settings.bgDim, 0.5, 0, 1),
             offset         : verify.number(params.settings.audioOffset, 0),
@@ -139,7 +150,8 @@ export default class Game
             showAPStatus   : verify.bool(params.settings.showAPStatus, true),
             challengeMode  : verify.bool(params.settings.challengeMode, false),
             autoPlay       : verify.bool(params.settings.autoPlay, false),
-            debug          : verify.bool(params.settings.debug, false)
+            debug          : verify.bool(params.settings.debug, false),
+            shader         : verify.bool(params.settings.shader, true)
         };
 
         this._watermarkText = verify.text(params.watermark, 'github/MisaLiu/phi-chart-render');
@@ -150,6 +162,7 @@ export default class Game
         this._gameEndTime   = NaN;
         this._isPaused = false;
         this._isEnded = false;
+        this._currentEffects = [];
 
         this.resize = this.resize.bind(this);
 
@@ -193,9 +206,10 @@ export default class Game
         }
 
         this.chart.createSprites(
-            this.render.mainContainer,
+            this.render.gameContainer,
             this.render.sizer,
             this.assets.textures,
+            this.render.UIContainer,
             this.zipFiles,
             this._settings.speed,
             this._settings.bgDim,
@@ -212,7 +226,7 @@ export default class Game
             };
         }
 
-        this.judgement.stage = this.render.mainContainer;
+        this.judgement.stage = this.render.UIContainer;
         this.judgement.createSprites(this._settings.showInputPoint);
 
         // 进度条
@@ -220,7 +234,7 @@ export default class Game
         this.sprites.progressBar.width = 0;
         this.sprites.progressBar.alpha = 0.75;
         this.sprites.progressBar.zIndex = 99999;
-        this.render.mainContainer.addChild(this.sprites.progressBar);
+        this.render.UIContainer.addChild(this.sprites.progressBar);
 
         // 暂停按钮
         this.sprites.pauseButton = new Sprite(this.assets.textures.pauseButton);
@@ -245,14 +259,14 @@ export default class Game
         this.sprites.pauseButton.anchor.set(1, 0);
         this.sprites.pauseButton.alpha = 0.5;
         this.sprites.pauseButton.zIndex = 99999;
-        this.render.mainContainer.addChild(this.sprites.pauseButton);
+        this.render.UIContainer.addChild(this.sprites.pauseButton);
 
         // 假判定线，过场动画用
         this.sprites.fakeJudgeline = new Sprite(this.assets.textures.judgeline);
         this.sprites.fakeJudgeline.anchor.set(0.5);
         this.sprites.fakeJudgeline.zIndex = 99999;
         if (this._settings.showAPStatus) this.sprites.fakeJudgeline.tint = 0xFFECA0;
-        this.render.mainContainer.addChild(this.sprites.fakeJudgeline);
+        this.render.UIContainer.addChild(this.sprites.fakeJudgeline);
 
         if (this._settings.showFPS)
         {
@@ -265,7 +279,7 @@ export default class Game
             this.render.fpsText.alpha = 0.5;
             this.render.fpsText.zIndex = 999999;
 
-            this.render.mainContainer.addChild(this.render.fpsText);
+            this.render.UIContainer.addChild(this.render.fpsText);
         }
 
         this.render.watermark = new Text(this._watermarkText, {
@@ -278,8 +292,42 @@ export default class Game
         this.render.watermark.zIndex = 999999;
         this.render.mainContainer.addChild(this.render.watermark);
 
+        this.render.gameContainer.sortChildren();
+        this.render.UIContainer.sortChildren();
         this.render.mainContainer.sortChildren();
         this.render.stage.sortChildren();
+
+        // 加载 Shaders
+        this.effects.forEach((effect) =>
+        {
+            if (effect.shader instanceof Shader) return;
+            if (!effect.shader || typeof effect.shader !== 'string')
+            {
+                effect.shader = null;
+                return;
+            }
+
+            const shaderName = effect.shader;
+            let shader = null;
+
+            if (shaderName.indexOf('/') === 0)
+            {
+                const shaderNameReal = shaderName.substr(1);
+                if (this.zipFiles[shaderNameReal]) shader = this.zipFiles[shaderNameReal];
+            }
+            else if (Shader.presets[shaderName])
+            {
+                shader = new Shader(Shader.presets[shaderName], shaderName);
+            }
+
+            effect.shader = shader;
+            
+            if (!effect.shader)
+            {
+                console.log('\'' + shaderName + '\' not found, will be ignored');
+                effect.shader = null;
+            }
+        });
     }
 
     start()
@@ -288,6 +336,7 @@ export default class Game
         if (!this.chart.music) throw new Error('You must have a music to play');
 
         this.resize();
+        for (const effect of this.effects) effect.reset();
 
         if (this.render.fpsText)
         {
@@ -347,12 +396,13 @@ export default class Game
     restart()
     {
         this.render.ticker.remove(this._calcTick);
-        this.chart.music.stop();
+        this.chart.music.reset();
 
         this.chart.reset();
         this.judgement.reset();
 
         this.resize();
+        for (const effect of this.effects) effect.reset();
 
         this._isPaused = false;
         this._isEnded = false;
@@ -387,7 +437,7 @@ export default class Game
         const canvas = this.render.view;
 
         this.render.ticker.remove(this._calcTick);
-        this.chart.music.stop();
+        this.chart.music.reset();
 
         if (this.render.fpsText) clearInterval(this.render.fpsCounter);
 
@@ -426,7 +476,7 @@ export default class Game
         this.render.renderer.resize(this.render.parentNode.clientWidth, this.render.parentNode.clientHeight);
 
         // 计算新尺寸相关数据
-        this.render.sizer = calcResizer(this.render.screen.width, this.render.screen.height, this._settings.noteScale);
+        this.render.sizer = calcResizer(this.render.screen.width, this.render.screen.height, this._settings.noteScale, this._settings.resolution);
 
         // 主舞台区位置重计算
         this.render.mainContainer.position.x = this.render.sizer.widthOffset;
@@ -514,11 +564,17 @@ export default class Game
             this.chart.resizeSprites(this.render.sizer, this._isEnded);
         }
     }
+
+    gameTimeInSec() {
+        return (Date.now() - this._gameStartTime) / 1000;
+    }
 }
 
-function calcResizer(width, height, noteScale = 8000)
+function calcResizer(width, height, noteScale = 8000, resolution = window.devicePixelRatio)
 {
     let result = {};
+
+    result.shaderScreenSize = [ width * resolution, height * resolution ];
 
     result.width  = height / 9 * 16 < width ? height / 9 * 16 : width;
     result.height = height;

@@ -1,8 +1,9 @@
 import * as PhiChartRender from './main';
 import FontFaceObserver from 'fontfaceobserver';
 import JSZip from 'jszip';
-import { Texture, Rectangle, utils as PIXIutils } from 'pixi.js';
+import { Texture, Rectangle } from 'pixi.js';
 import { canvasRGB as StackBlur } from 'stackblur-canvas';
+import Pica from 'pica';
 import * as Sentry from '@sentry/browser';
 import { BrowserTracing } from '@sentry/tracing';
 import './phizone';
@@ -51,12 +52,14 @@ const doms = {
         bg: document.querySelector('select#file-bg')
     },
     settings: {
+        showBG: document.querySelector('input#settings-show-bg'),
         multiNoteHL: document.querySelector('input#settings-multi-note-hl'),
         showAPStatus: document.querySelector('input#settings-show-ap-status'),
         showInputPoint: document.querySelector('input#settings-show-input-point'),
         noteScale: document.querySelector('input#settings-note-scale'),
         bgDim: document.querySelector('input#settings-bg-dim'),
         bgBlur: document.querySelector('input#settings-bg-blur'),
+        bgQuality: document.querySelector('select#settings-bg-quality'),
 
         offset: document.querySelector('input#settings-audio-offset'),
         useBrowserLatency: document.querySelector('input#settings-use-browser-latency'),
@@ -69,10 +72,10 @@ const doms = {
         challengeMode: document.querySelector('input#settings-challenge-mode'),
         plyndb: document.querySelector('input#settings-plyndb'),
         autoPlay: document.querySelector('input#settings-autoplay'),
-        forceCanvas: document.querySelector('input#settings-force-canvas'),
         antiAlias: document.querySelector('input#settings-anti-alias'),
         lowResolution: document.querySelector('input#settings-low-resolution'),
-        debug: document.querySelector('input#settings-debug')
+        debug: document.querySelector('input#settings-debug'),
+        prprExtra: document.querySelector('input#settings-prpr-extra')
     },
     startBtn : document.querySelector('button#start'),
     loadingStatus : document.querySelector('div#loading-status'),
@@ -97,6 +100,7 @@ const files = {
     images: {},
     infos: [],
     lines: [],
+    shaders: {},
     all: {}
 };
 
@@ -365,11 +369,15 @@ doms.startBtn.addEventListener('click', async () => {
     if (!zipFiles['HoldEnd.png']) zipFiles['HoldEnd.png'] = assets.textures.holdEnd;
 
     currentFile.chart.music = currentFile.music;
-    if (currentFile.bg)
+    if (currentFile.bg && doms.settings.showBG.checked)
     {
-        let bgBlur = await Texture.from(await blurImage(currentFile.bg, doms.settings.bgBlur.value));
+        let bgBlur = await Texture.from(await blurImage(await resizeImage(currentFile.bg, parseInt(doms.settings.bgQuality.value)), doms.settings.bgBlur.value));
         Texture.addToCache(bgBlur, doms.file.bg.value + '_blured');
         currentFile.chart.bg = bgBlur;
+    }
+    else
+    {
+        currentFile.chart.bg = null;
     }
 
     if (files.infos && files.infos.length > 0)
@@ -407,12 +415,12 @@ doms.startBtn.addEventListener('click', async () => {
     window._game = new PhiChartRender.Game({
         chart: currentFile.chart,
         assets: assets,
+        effects: files.effects,
         zipFiles: zipFiles,
         render: {
             resizeTo: document.documentElement,
             resolution: doms.settings.lowResolution.checked ? 1 : window.devicePixelRatio,
-            antialias: doms.settings.antiAlias.checked,
-            forceCanvas: doms.settings.forceCanvas.checked
+            antialias: doms.settings.antiAlias.checked
         },
         settings: {
             multiNoteHL: doms.settings.multiNoteHL.checked,
@@ -421,7 +429,7 @@ doms.startBtn.addEventListener('click', async () => {
             bgDim: doms.settings.bgDim.value,
             noteScale: 10000 - doms.settings.noteScale.value,
 
-            audioOffset: doms.settings.offset.value / 1000 + (doms.settings.useBrowserLatency.checked ? PhiChartRender.audioLatency : 0),
+            audioOffset: doms.settings.offset.value / 1000 + (doms.settings.useBrowserLatency.checked ? PhiChartRender.WAudio.globalLatency : 0),
             speed: doms.settings.speed.value,
 
             hitsound: doms.settings.hitsound.checked,
@@ -429,7 +437,8 @@ doms.startBtn.addEventListener('click', async () => {
 
             challengeMode: doms.settings.challengeMode.checked,
             autoPlay: doms.settings.autoPlay.checked,
-            debug : doms.settings.debug.checked
+            debug: doms.settings.debug.checked,
+            shader: doms.settings.prprExtra.checked
         },
         watermark: 'github/MisaLiu/phi-chart-render ' + GIT_VERSION + (process.env.NODE_ENV === 'development' ? ' [Develop Mode]' : '')
     });
@@ -597,12 +606,6 @@ window.addEventListener('load', async () =>
 
     calcHeightPercent();
 
-    if (!PIXIutils.isWebGLSupported())
-    {
-        doms.settings.forceCanvas.checked = true;
-        doms.settings.forceCanvas.disabled = true;
-    }
-
     doms.settings.testInputDelay.testTimes = 0;
     doms.settings.testInputDelay.testDelays = 0;
 
@@ -652,6 +655,8 @@ window.addEventListener('load', async () =>
             }
         );
     }
+
+    initConsoleEasterEgg();
 
     function requestFile(url)
     {
@@ -815,6 +820,49 @@ function blurImage(_texture, radius = 10)
             .then(result => res(result))
             .catch(e => rej(e))
     });
+}
+
+function resizeImage(_texture, quality = 1)
+{
+    let canvas = document.createElement('canvas');
+    let texture;
+    let pica = Pica({
+        features: ['all']
+    });
+
+    if (_texture.baseTexture) texture = _texture.baseTexture.resource.source;
+    else texture = _texture;
+
+    switch (quality)
+    {
+        case 0: {
+            canvas.width = 480;
+            canvas.height = texture.height * (480 / texture.width);
+            break;
+        }
+        case 1:
+        {
+            canvas.width = 720;
+            canvas.height = texture.height * (720 / texture.width);
+            break;
+        }
+        case 2:
+        {
+            canvas.width = 1080;
+            canvas.height = texture.height * (1080 / texture.width);
+            break;
+        }
+        default:
+        {
+            canvas.width = texture.width;
+            canvas.height = texture.height;
+        }
+    }
+
+    return (new Promise(async (res, rej) =>
+    {
+        res(await createImageBitmap(await pica.resize(texture, canvas)));
+    }));
 }
 
 function calcHeightPercent()
@@ -1090,6 +1138,25 @@ async function loadChartFiles(_files)
                 
             }
         }
+        else if (file.name === 'extra.json')
+        {
+            if (files.effects instanceof Array)
+            {
+                console.warn('Already loaded an extra.json, previously loaded file will be overwritten');
+                files.effects = null;
+            }
+
+            try {
+                let rawText = await readText(file);
+                let effects = PhiChartRender.Effect.from(JSON.parse(rawText));
+
+                files.effects = effects;
+                files.all[file.name] = effects;
+
+            } catch (e) {
+
+            } 
+        }
         else if (file.name === 'Settings.txt' || file.name === 'info.txt')
         {
             try {
@@ -1174,9 +1241,16 @@ async function loadChartFiles(_files)
 
                 return;
             })
+            .catch(async () =>
+            {
+                let shaderRaw = await readText(file);
+                let shader = PhiChartRender.Shader.from(shaderRaw, file.name);
+
+                files.shaders[file.name] = shader;
+                files.all[file.name] = shader;
+            })
             .catch((e) =>
             {
-                console.error(e);
                 console.error('Unsupported file: ' + file.name);
                 return;
             }));
@@ -1216,6 +1290,58 @@ async function loadChartFiles(_files)
         let option = document.createElement('option');
         option.innerText = option.value = file.name;
         return option;
+    }
+}
+
+async function initConsoleEasterEgg()
+{
+    try {
+        let url = await getImageBase64('./icons/64.png');
+        console.log('%c ', 'padding:32px;background:url(' + url + ') center center no-repeat;');
+    } catch (e) {}
+    
+    console.log('%cphi-chart-render%c' + GIT_VERSION, 'padding:8px;background-color:#1C1C1C;color:#FFF', 'padding:8px;background-color:#1E90FF;color:#FFF;');
+    
+    try {
+        let url = await getImageBase64('./icons/github.png');
+        console.log('%chttps://github.com/MisaLiu/phi-chart-render', 'padding:4px;padding-left:22px;background:url(' + url + ') left center no-repeat;background-color:#1C1C1C;background-size:contain;color:#FFF;');
+    } catch (e) {
+        console.log('%cGitHub: https://github.com/MisaLiu/phi-chart-render', 'padding:4px;background-color:#1C1C1C;color:#FFF;');
+    }
+    
+    console.groupCollapsed('❤️ Support me');
+    try {
+        let url = await getImageBase64('./icons/patreon.png');
+        console.log('%chttps://patreon.com/HIMlaoS_Misa', 'padding:4px;padding-left:22px;background:url(' + url + ') left center no-repeat;background-color:#f3455c;background-size:contain;color:#FFF;');
+    } catch (e) {
+        console.log('%Patreon: https://patreon.com/HIMlaoS_Misa', 'padding:4px;background-color:#f3455c;color:#FFF;');
+    }
+    
+    try {
+        let url = await getImageBase64('./icons/afdian.png');
+        console.log('%chttps://afdian.net/@MisaLiu', 'padding:4px;padding-left:22px;background:url(' + url + ') left center no-repeat;background-color:#946CE6;background-size:contain;color:#FFF;');
+    } catch (e) {
+        console.log('%爱发电: https://afdian.net/@MisaLiu', 'padding:4px;background-color:#946CE6;color:#FFF;');
+    }
+
+    console.groupEnd();
+
+    function getImageBase64(url) {
+        return new Promise((resolve, reject) => {
+            fetch(url)
+                .then(res => res.blob())
+                .then(res => {
+                    let reader = new FileReader();
+                    reader.onload = () => {
+                        resolve(reader.result);
+                    };
+                    reader.onerror = (e) => {
+                        reject(e);
+                    };
+                    reader.readAsDataURL(res);
+                }
+            );
+        });
     }
 }
 

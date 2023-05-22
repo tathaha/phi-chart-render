@@ -45,7 +45,7 @@ function calcTick()
         }
         case 1:
         {
-            let { chart, judgement, functions, processors, sprites, render, _settings: settings } = this;
+            let { chart, effects, judgement, functions, processors, sprites, render, _settings: settings } = this;
             let currentTime = chart.music.currentTime - (chart.offset + settings.offset);
 
             for (let i = 0, length = chart.bpmList.length; i < length; i++)
@@ -76,9 +76,28 @@ function calcTick()
             {
                 judgement.calcTick();
                 for (let x = 0, length = functions.tick.length; x < length; x++) functions.tick[x](this, currentTime);
+
+                if (settings.shader)
+                {
+                    render.gameContainer.filters = [];
+                    render.stage.filters = [];
+
+                    for (let i = 0, length = effects.length; i < length; i++)
+                    {
+                        const effect = effects[i];
+                        if (effect.shader === null) continue;
+                        if (effect.endTime < currentTime) continue;
+                        if (effect.startTime > currentTime) break;
+
+                        effect.calcTime(currentTime, render.sizer.shaderScreenSize);
+                        if (effect.isGlobal) render.stage.filters.push(effect.shader);
+                        else render.gameContainer.filters.push(effect.shader);
+                    }
+                }
             }
 
             sprites.progressBar.scale.x = chart.music.progress * sprites.progressBar.baseScaleX;
+
             break;
         }
         case 2:
